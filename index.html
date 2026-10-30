@@ -62,7 +62,7 @@ async function loadFol(){if(!ME){FOL=[];return}const{data}=await sb.from('follow
 async function refresh(){
  if(!ME)return;
  if(V==='search'){RES=Q?((await sb.from('profiles').select('*').ilike('name','%'+Q.replace(/[%_]/g,'')+'%').limit(30)).data||[]):[];return render()}
- let q=sb.from('posts').select('*,profiles(id,name,emoji,avatar_url,kind),likes(profile_id),comments(id)').order('created_at',{ascending:false}).limit(50);
+ let q=sb.from('posts').select('*,profiles!profile_id(id,name,emoji,avatar_url,kind),likes(profile_id),comments(id)').order('created_at',{ascending:false}).limit(50);
  if(V==='feed'&&TAB==='sub')q=q.in('profile_id',[...FOL,ME]);
  if(V==='profile'){
   q=q.eq('profile_id',VP);
@@ -107,7 +107,7 @@ async function setMe(id){ME=id;localStorage.setItem('petsy_me',id);SHEET=null;aw
 function openP(id){VP=id;V='profile';SHEET=null;refresh();scrollTo(0,0)}
 async function like(id,liked){await run(liked?sb.from('likes').delete().eq('post_id',id).eq('profile_id',ME):sb.from('likes').insert({post_id:id,profile_id:ME}));refresh()}
 async function toggleC(id){OPEN[id]=!OPEN[id];if(OPEN[id])await loadC(id);render()}
-async function loadC(id){CM[id]=(await sb.from('comments').select('id,body,profile_id,profiles(name)').eq('post_id',id).order('created_at')).data||[]}
+async function loadC(id){CM[id]=(await sb.from('comments').select('id,body,profile_id,profiles!profile_id(name)').eq('post_id',id).order('created_at')).data||[]}
 async function addC(id){const el=$('#c'+id),t=el.value.trim();if(!t)return;
  if(await run(sb.from('comments').insert({post_id:id,profile_id:ME,body:t}))){await loadC(id);refresh()}}
 async function delC(c,id){if(await run(sb.from('comments').delete().eq('id',c))){await loadC(id);refresh()}}
