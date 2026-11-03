@@ -51,6 +51,7 @@ async function run(p){const{error}=await p;if(error){toast(error.message);return
 
 async function init(){
  const{data:{session}}=await sb.auth.getSession();U=session?.user||null;
+ if(U){const{error}=await sb.auth.getUser();if(error){await sb.auth.signOut({scope:'local'});U=null}}
  sb.auth.onAuthStateChange((_e,s)=>{const n=s?.user||null;if(n?.id!==U?.id){U=n;boot()}});
  sb.channel('live').on('postgres_changes',{event:'*',schema:'public',table:'posts'},live).on('postgres_changes',{event:'*',schema:'public',table:'likes'},live).on('postgres_changes',{event:'*',schema:'public',table:'comments'},live).on('postgres_changes',{event:'*',schema:'public',table:'messages'},liveM).on('postgres_changes',{event:'*',schema:'public',table:'notifications'},liveN).subscribe();
  boot()}
@@ -111,7 +112,7 @@ async function auth(up){const email=$('#em').value.trim(),password=$('#pw').valu
  if(r.error)return toast(r.error.message);if(up&&!r.data.session)toast('Проверьте почту и подтвердите адрес')}
 async function createP(o){const name=(o.name||'').trim();if(!name)return;
  const{data,error}=await sb.from('profiles').insert({account_id:U.id,kind:o.kind,name,emoji:o.emoji}).select().single();
- if(error)return toast(error.message);MY.push(data);setMe(data.id);NP={name:'',kind:'pet',emoji:'🐶'}}
+ if(error){if(error.code==='23503'){await sb.auth.signOut();return toast('Сессия устарела. Войдите или зарегистрируйтесь заново')}return toast(error.message)}MY.push(data);setMe(data.id);NP={name:'',kind:'pet',emoji:'🐶'}}
 async function setMe(id){ME=id;localStorage.setItem('petsy_me',id);SHEET=null;await loadFol();V='feed';refresh();refreshUnread();refreshN()}
 function openP(id){VP=id;V='profile';SHEET=null;refresh();scrollTo(0,0)}
 async function like(id,liked,to){const ok=await run(liked?sb.from('likes').delete().eq('post_id',id).eq('profile_id',ME):sb.from('likes').insert({post_id:id,profile_id:ME}));if(ok&&!liked)notify(to,'like',id);refresh()}
