@@ -26,7 +26,7 @@ input,textarea{width:100%;font:inherit;color:inherit;background:var(--bg);border
 .btn{background:var(--ac);color:#fff;border-radius:12px;padding:10px 16px;font-weight:600;display:inline-block}.btn.s{background:var(--ac2);color:var(--tx)}
 .tabs{display:flex;border-bottom:1px solid var(--ln)}.tabs button{flex:1;padding:12px;color:var(--mut);font-weight:600;border-bottom:2px solid transparent}.tabs .on{color:var(--ac);border-color:var(--ac)}
 nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--ln);display:flex;justify-content:space-around;padding:8px 0 calc(8px + env(safe-area-inset-bottom,0px));z-index:5}
-nav button{font-size:26px;padding:2px 22px;opacity:.5}nav .on{opacity:1}
+nav button{font-size:26px;padding:2px 14px;opacity:.5}nav .on{opacity:1}
 .box{padding:16px}.row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .chip{border:1px solid var(--ln);border-radius:99px;padding:6px 12px;background:var(--card);cursor:pointer}.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 .emo{font-size:26px;border-radius:12px;padding:4px 8px;border:2px solid transparent}.emo.on{border-color:var(--ac)}
@@ -42,7 +42,7 @@ nav button{font-size:26px;padding:2px 22px;opacity:.5}nav .on{opacity:1}
 const sb=supabase.createClient('https://hkrqircokynwhbseapxi.supabase.co','sb_publishable_jtKGfMID3eT5AdPmyAX8Ww_eR_YHuk1');
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const PET=['🐶','🐱','🐰','🐹','🐦','🐠','🐢','🦜','🐴','🐍'],PPL=['🙂','😎','👩','🧔','🧑‍🌾'];
-let U=null,MY=[],ME=null,V='feed',TAB='all',POSTS=[],FOL=[],SHEET=null,OPEN={},CM={},Q='',DR='',PINFO=null,VP=null,RES=[],OB={name:'',emoji:'🙂'},NP={name:'',kind:'pet',emoji:'🐶'};
+let U=null,MY=[],ME=null,V='feed',TAB='all',POSTS=[],FOL=[],SHEET=null,OPEN={},CM={},Q='',DR='',PINFO=null,VP=null,RES=[],INBOX=[],CHAT=null,MSGS=[],PEER=null,UNREAD=0,LIST=null,OB={name:'',emoji:'🙂'},NP={name:'',kind:'pet',emoji:'🐶'};
 const me=()=>MY.find(p=>p.id===ME);
 const av=(p,s=40)=>`<span class="av" style="width:${s}px;height:${s}px;font-size:${s*.55}px">${p.avatar_url?`<img src="${esc(p.avatar_url)}" alt="">`:esc(p.emoji)}</span>`;
 function toast(t){const e=document.createElement('div');e.textContent=t;e.style.cssText='position:fixed;left:16px;right:16px;bottom:90px;max-width:480px;margin:auto;background:#2b2118;color:#fff;padding:12px 16px;border-radius:12px;z-index:20';document.body.appendChild(e);setTimeout(()=>e.remove(),4000)}
@@ -52,15 +52,17 @@ async function run(p){const{error}=await p;if(error){toast(error.message);return
 async function init(){
  const{data:{session}}=await sb.auth.getSession();U=session?.user||null;
  sb.auth.onAuthStateChange((_e,s)=>{const n=s?.user||null;if(n?.id!==U?.id){U=n;boot()}});
- sb.channel('live').on('postgres_changes',{event:'*',schema:'public',table:'posts'},live).on('postgres_changes',{event:'*',schema:'public',table:'likes'},live).on('postgres_changes',{event:'*',schema:'public',table:'comments'},live).subscribe();
+ sb.channel('live').on('postgres_changes',{event:'*',schema:'public',table:'posts'},live).on('postgres_changes',{event:'*',schema:'public',table:'likes'},live).on('postgres_changes',{event:'*',schema:'public',table:'comments'},live).on('postgres_changes',{event:'*',schema:'public',table:'messages'},liveM).subscribe();
  boot()}
 function live(){if(U&&ME&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName))refresh()}
-async function boot(){if(!U){MY=[];ME=null;return render()}await loadMy();render();refresh()}
+async function boot(){if(!U){MY=[];ME=null;return render()}await loadMy();render();refresh();refreshUnread()}
 async function loadMy(){const{data}=await sb.from('profiles').select('*').eq('account_id',U.id).order('created_at');MY=data||[];const s=localStorage.getItem('petsy_me');ME=MY.find(p=>p.id===s)?s:MY[0]?.id||null;await loadFol()}
 async function loadFol(){if(!ME){FOL=[];return}const{data}=await sb.from('follows').select('followee_id').eq('follower_id',ME);FOL=(data||[]).map(x=>x.followee_id)}
 
 async function refresh(){
  if(!ME)return;
+ if(V==='inbox'){await loadInbox();return render()}
+ if(V==='chat'){await loadChat();render();scrollTo(0,document.body.scrollHeight);return}
  if(V==='search'){RES=Q?((await sb.from('profiles').select('*').ilike('name','%'+Q.replace(/[%_]/g,'')+'%').limit(30)).data||[]):[];return render()}
  let q=sb.from('posts').select('*,profiles!profile_id(id,name,emoji,avatar_url,kind),likes(profile_id),comments(id)').order('created_at',{ascending:false}).limit(50);
  if(V==='feed'&&TAB==='sub')q=q.in('profile_id',[...FOL,ME]);
@@ -79,14 +81,17 @@ function postH(x){
  <div class="acts"><button class="${liked?'on':''}" onclick="like('${x.id}',${liked})">${liked?'❤️':'🤍'} ${l.length}</button><button onclick="toggleC('${x.id}')">💬 ${x.comments.length}</button>${mine?`<button style="margin-left:auto" onclick="delP('${x.id}')">🗑</button>`:''}</div>${cm}</article>`}
 
 function body(){
+ if(V==='inbox')return inboxH();
+ if(V==='chat')return chatH();
  if(V==='create')return `<div class="box"><div class="ph" style="cursor:default">${av(me())}<b>Пост от имени ${esc(me().name)}</b></div><textarea id="tx" rows="4" style="margin-top:12px" placeholder="Что нового у ${esc(me().name)}?" oninput="DR=this.value">${esc(DR)}</textarea><div class="row"><label class="btn s">📷 Фото / видео<input id="fl" type="file" accept="image/*,video/*" hidden onchange="this.previousSibling.nodeValue='📎 '+this.files[0].name+' '"></label><button class="btn" id="pb" onclick="publish()">Опубликовать</button></div></div>`;
  if(V==='search')return `<div class="box"><input placeholder="🔍 Поиск по имени, Enter" value="${esc(Q)}" onkeydown="if(event.key==='Enter'){Q=this.value.trim();refresh()}"></div>${RES.map(p=>`<div class="ph" style="padding:10px 16px" onclick="openP('${p.id}')">${av(p)}<div><b>${esc(p.name)}</b><small>${p.kind==='pet'?'питомец'+(p.breed?' · '+esc(p.breed):''):'человек'}</small></div></div>`).join('')||(Q?'<p class="mut box">Ничего не найдено</p>':'')}`;
  if(V==='profile'&&PINFO?.p){const p=PINFO.p,own=MY.some(x=>x.id===p.id),f=FOL.includes(p.id);
-  return `<div class="prof">${av(p,88)}<h2 style="margin:10px 0 0">${esc(p.name)}</h2><div class="mut">${p.kind==='pet'?'Питомец'+(p.breed?' · '+esc(p.breed):''):'Человек'}</div><p>${esc(p.bio)}</p><div class="cnt"><div><b>${POSTS.length}</b><span class="mut">постов</span></div><div><b>${PINFO.fr}</b><span class="mut">подписчиков</span></div><div><b>${PINFO.fg}</b><span class="mut">подписок</span></div></div>${own?'':`<button class="btn ${f?'s':''}" onclick="follow('${p.id}')">${f?'Вы подписаны ✓':'Подписаться'}</button>`}</div>${POSTS.map(postH).join('')||'<p class="mut" style="text-align:center">Пока нет постов</p>'}`}
+  return `<div class="prof">${av(p,88)}<h2 style="margin:10px 0 0">${esc(p.name)}</h2><div class="mut">${p.kind==='pet'?'Питомец'+(p.breed?' · '+esc(p.breed):''):'Человек'}</div><p>${esc(p.bio)}</p><div class="cnt"><div><b>${POSTS.length}</b><span class="mut">постов</span></div><div onclick="showList('fr')" style="cursor:pointer"><b>${PINFO.fr}</b><span class="mut">подписчиков</span></div><div onclick="showList('fg')" style="cursor:pointer"><b>${PINFO.fg}</b><span class="mut">подписок</span></div></div>${own?'':`<div class="row" style="justify-content:center"><button class="btn ${f?'s':''}" onclick="follow('${p.id}')">${f?'Вы подписаны ✓':'Подписаться'}</button><button class="btn s" onclick="openChat('${p.id}')">💬 Написать</button></div>`}</div>${POSTS.map(postH).join('')||'<p class="mut" style="text-align:center">Пока нет постов</p>'}`}
  const sub=TAB==='sub';
  return `<div class="tabs"><button class="${sub?'':'on'}" onclick="TAB='all';refresh()">Для вас</button><button class="${sub?'on':''}" onclick="TAB='sub';refresh()">Подписки</button></div>${POSTS.map(postH).join('')||`<p class="mut" style="text-align:center;padding:40px 16px">${sub?'Подпишитесь на кого-нибудь через 🔍 поиск':'Пока нет постов. Напишите первый! 🐾'}</p>`}`}
 
 function sheetH(){
+ if(SHEET==='list')return listH();
  if(SHEET==='sw')return `<div class="sw" onclick="if(event.target===this){SHEET=null;render()}"><div class="sh"><b>Действовать от имени</b>${MY.map(p=>`<div class="ph" style="padding:10px 0" onclick="setMe('${p.id}')">${av(p)}<div><b>${esc(p.name)}</b><small>${p.kind==='pet'?'питомец':'человек'}</small></div>${p.id===ME?'<span style="margin-left:auto">✓</span>':''}</div>`).join('')}<button class="btn" style="width:100%;margin-top:8px" onclick="SHEET='new';render()">+ Новый профиль</button><button class="btn s" style="width:100%;margin-top:8px" onclick="sb.auth.signOut()">Выйти</button></div></div>`;
  if(SHEET==='new'){const l=NP.kind==='pet'?PET:PPL;return `<div class="sw" onclick="if(event.target===this){SHEET=null;render()}"><div class="sh"><b>Новый профиль</b><div class="row"><span class="chip ${NP.kind==='pet'?'on':''}" onclick="NP.kind='pet';NP.emoji='🐶';render()">🐾 Питомец</span><span class="chip ${NP.kind==='person'?'on':''}" onclick="NP.kind='person';NP.emoji='🙂';render()">🙂 Человек</span></div><div class="row">${l.map(e=>`<button class="emo ${NP.emoji===e?'on':''}" onclick="NP.emoji='${e}';render()">${e}</button>`).join('')}</div><input placeholder="${NP.kind==='pet'?'Кличка':'Имя'}" value="${esc(NP.name)}" oninput="NP.name=this.value"><button class="btn" style="width:100%;margin-top:12px" onclick="createP(NP)">Создать</button></div></div>`}
  return ''}
@@ -95,7 +100,7 @@ function render(){const a=$('#app');
  if(!U)return a.innerHTML=`<div class="box" style="padding-top:60px"><div class="logo" style="text-align:center;font-size:36px">🐾 Petsy</div><p class="mut" style="text-align:center">Соцсеть для тех, кто любит питомцев</p><input id="em" type="email" placeholder="Почта" autocomplete="email" style="margin-bottom:8px"><input id="pw" type="password" placeholder="Пароль (от 6 символов)" autocomplete="current-password"><div class="row"><button class="btn" style="flex:1" onclick="auth(0)">Войти</button><button class="btn s" style="flex:1" onclick="auth(1)">Регистрация</button></div></div>`;
  if(!MY.length)return a.innerHTML=`<div class="box" style="padding-top:50px"><div class="logo" style="text-align:center;font-size:30px">Создайте профиль</div><p class="mut" style="text-align:center">Питомцев можно добавить потом.</p><div class="row" style="justify-content:center">${PPL.map(e=>`<button class="emo ${OB.emoji===e?'on':''}" onclick="OB.emoji='${e}';render()">${e}</button>`).join('')}</div><input placeholder="Ваше имя" value="${esc(OB.name)}" oninput="OB.name=this.value"><button class="btn" style="width:100%;margin-top:12px" onclick="createP({name:OB.name,kind:'person',emoji:OB.emoji})">Присоединиться</button></div>`;
  const m=me(),n=(v,i,f)=>`<button class="${V===v?'on':''}" onclick="${f||`V='${v}';refresh()`}">${i}</button>`;
- a.innerHTML=`<header><span class="logo">🐾 Petsy</span><button class="me" onclick="SHEET='sw';render()">${av(m,28)}<b>${esc(m.name)}</b> ▾</button></header>${body()}<nav>${n('feed','🏠')}${n('search','🔍')}${n('create','➕')}${n('profile',esc(m.emoji),`openP('${m.id}')`)}</nav>${sheetH()}`}
+ a.innerHTML=`<header><span class="logo">🐾 Petsy</span><button class="me" onclick="SHEET='sw';render()">${av(m,28)}<b>${esc(m.name)}</b> ▾</button></header>${body()}<nav>${n('feed','🏠')}${n('search','🔍')}${n('create','➕')}<button class="${V==='inbox'||V==='chat'?'on':''}" onclick="V='inbox';refresh()">💬<sup id="ub" style="font-size:11px;color:var(--ac);font-weight:700">${UNREAD||''}</sup></button>${n('profile',esc(m.emoji),`openP('${m.id}')`)}</nav>${sheetH()}`}
 
 async function auth(up){const email=$('#em').value.trim(),password=$('#pw').value;
  const r=up?await sb.auth.signUp({email,password}):await sb.auth.signInWithPassword({email,password});
@@ -113,12 +118,34 @@ async function addC(id){const el=$('#c'+id),t=el.value.trim();if(!t)return;
 async function delC(c,id){if(await run(sb.from('comments').delete().eq('id',c))){await loadC(id);refresh()}}
 async function delP(id){if(confirm('Удалить пост?')&&await run(sb.from('posts').delete().eq('id',id)))refresh()}
 async function follow(id){const f=FOL.includes(id);
- if(await run(f?sb.from('follows').delete().eq('follower_id',ME).eq('followee_id',id):sb.from('follows').insert({follower_id:ME,followee_id:id}))){await loadFol();refresh()}}
+ if(await run(f?sb.from('follows').delete().eq('follower_id',ME).eq('followee_id',id):sb.from('follows').insert({follower_id:ME,followee_id:id}))){await loadFol();if(SHEET==='list')await loadList();refresh()}}
 async function publish(){const t=$('#tx').value.trim(),f=$('#fl').files[0];if(!t&&!f)return;$('#pb').disabled=true;let url=null,type=null;
  if(f){const ext=(f.name.split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,''),path=`${U.id}/${Date.now()}.${ext}`;
   const{error}=await sb.storage.from('media').upload(path,f,{contentType:f.type});if(error){$('#pb').disabled=false;return toast(error.message)}
   url=sb.storage.from('media').getPublicUrl(path).data.publicUrl;type=f.type.startsWith('video')?'video':'image'}
  if(await run(sb.from('posts').insert({profile_id:ME,body:t,media_url:url,media_type:type}))){DR='';V='feed';TAB='all';refresh()}else $('#pb').disabled=false}
+async function refreshUnread(){if(!ME)return;const{count}=await sb.from('messages').select('id',{count:'exact',head:true}).eq('recipient_id',ME).eq('is_read',false);UNREAD=count||0;const e=$('#ub');if(e)e.textContent=UNREAD||''}
+async function loadInbox(){const{data}=await sb.from('messages').select('*').or(`sender_id.eq.${ME},recipient_id.eq.${ME}`).order('created_at',{ascending:false}).limit(300);
+ const m=new Map();(data||[]).forEach(x=>{const pid=x.sender_id===ME?x.recipient_id:x.sender_id;if(!m.has(pid))m.set(pid,{last:x,unread:0});if(x.recipient_id===ME&&!x.is_read)m.get(pid).unread++});
+ const ids=[...m.keys()],ps=ids.length?((await sb.from('profiles').select('*').in('id',ids)).data||[]):[];
+ INBOX=ids.map(id=>({...m.get(id),p:ps.find(p=>p.id===id)})).filter(x=>x.p)}
+async function loadChat(){const f=`and(sender_id.eq.${ME},recipient_id.eq.${CHAT}),and(sender_id.eq.${CHAT},recipient_id.eq.${ME})`;
+ const[a,b]=await Promise.all([sb.from('messages').select('*').or(f).order('created_at').limit(300),sb.from('profiles').select('*').eq('id',CHAT).single()]);
+ MSGS=a.data||[];PEER=b.data;
+ if(MSGS.some(x=>x.recipient_id===ME&&!x.is_read)){await sb.from('messages').update({is_read:true}).eq('recipient_id',ME).eq('sender_id',CHAT).eq('is_read',false);refreshUnread()}}
+async function liveM(){if(!U||!ME)return;await refreshUnread();if(V==='chat'){await loadChat();renderThread()}else if(V==='inbox'){await loadInbox();render()}}
+function openChat(id){CHAT=id;PEER=null;V='chat';SHEET=null;refresh()}
+async function sendM(){const el=$('#mi'),t=el.value.trim();if(!t)return;el.value='';if(await run(sb.from('messages').insert({sender_id:ME,recipient_id:CHAT,body:t}))){await loadChat();renderThread()}}
+function thH(){return MSGS.map(m=>{const mine=m.sender_id===ME;return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:78%;padding:8px 12px;border-radius:16px;background:${mine?'var(--ac)':'var(--card)'};color:${mine?'#fff':'var(--tx)'};border:1px solid var(--ln);word-break:break-word">${esc(m.body)}<div style="font-size:11px;opacity:.7">${ago(m.created_at)}</div></div>`}).join('')||'<p class="mut" style="text-align:center">Скажите привет 👋</p>'}
+function renderThread(){const t=$('#th');if(t){t.innerHTML=thH();scrollTo(0,document.body.scrollHeight)}}
+function chatH(){if(!PEER)return '<p class="mut" style="text-align:center;padding:40px">Загрузка…</p>';
+ return `<div class="ph" style="padding:10px 16px;border-bottom:1px solid var(--ln)"><button onclick="V='inbox';refresh()" style="font-size:20px">←</button><span onclick="openP('${PEER.id}')" style="display:flex;gap:10px;align-items:center">${av(PEER,36)}<b>${esc(PEER.name)}</b></span></div><div id="th" style="padding:12px 16px;display:flex;flex-direction:column;gap:6px">${thH()}</div><div class="cmi" style="padding:0 16px"><input id="mi" placeholder="Сообщение от имени ${esc(me().name)}…" onkeydown="if(event.key==='Enter')sendM()"><button class="btn" onclick="sendM()">→</button></div>`}
+function inboxH(){return `<div class="box"><b style="font-size:18px">Сообщения</b></div>`+(INBOX.map(c=>`<div class="ph" style="padding:12px 16px;border-bottom:1px solid var(--ln)" onclick="openChat('${c.p.id}')">${av(c.p,48)}<div style="min-width:0"><b>${esc(c.p.name)}</b><small style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.last.sender_id===ME?'Вы: ':''}${esc(c.last.body)}</small></div>${c.unread?`<span class="chip on" style="margin-left:auto">${c.unread}</span>`:''}</div>`).join('')||'<p class="mut" style="text-align:center;padding:32px 16px">Нет диалогов. Откройте чужой профиль и нажмите «Написать» 🐾</p>')}
+async function loadList(){const sel='id,name,emoji,avatar_url,kind',fr=LIST.mode==='fr',
+ r=fr?await sb.from('follows').select(`profiles!follower_id(${sel})`).eq('followee_id',VP):await sb.from('follows').select(`profiles!followee_id(${sel})`).eq('follower_id',VP);
+ LIST.items=(r.data||[]).map(x=>x.profiles).filter(Boolean)}
+async function showList(mode){LIST={mode,items:[]};SHEET='list';render();await loadList();render()}
+function listH(){return `<div class="sw" onclick="if(event.target===this){SHEET=null;render()}"><div class="sh" style="max-height:70vh;overflow:auto"><b>${LIST.mode==='fr'?'Подписчики':'Подписки'}</b>${LIST.items.map(p=>`<div class="ph" style="padding:10px 0" onclick="openP('${p.id}')">${av(p)}<div><b>${esc(p.name)}</b><small>${p.kind==='pet'?'питомец':'человек'}</small></div>${MY.some(m=>m.id===p.id)?'':`<button class="btn ${FOL.includes(p.id)?'s':''}" style="margin-left:auto;padding:6px 12px" onclick="event.stopPropagation();follow('${p.id}')">${FOL.includes(p.id)?'Вы подписаны':'Подписаться'}</button>`}</div>`).join('')||'<p class="mut">Пока никого</p>'}</div></div>`}
 init();
 </script>
 </body>
